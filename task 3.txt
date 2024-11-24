@@ -1,0 +1,249 @@
+from flask import Flask, request, jsonify
+import pandas as pd
+import pytz
+import smtplib
+from email.message import EmailMessage
+import json
+import os
+import logging
+from dotenv import load_dotenv
+from waitress import serve  # Import Waitress
+from logging.handlers import RotatingFileHandler
+
+# Load environment variables
+load_dotenv()
+
+app = Flask(_name_)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(), RotatingFileHandler("app.log", maxBytes=1000000, backupCount=3)]
+)
+
+# Load leads from a file (in this case, a JSON file)
+leads_file = "leads.json"
+
+def load_leads():
+    try:
+        with open(leads_file, "r") as file:
+            return pd.DataFrame(json.load(file))
+    except FileNotFoundError:
+        return pd.DataFrame(columns=['name', 'email', 'budget', 'time_zone', 'timestamp_utc', 'local_timestamp', 'assigned_sales_rep', 'comments'])
+
+def save_leads(leads):
+    leads.to_json(leads_file, orient="records", indent=4)
+
+# Validate lead data
+def validate_lead(lead):
+    required_fields = ['name', 'email', 'budget', 'time_zone']
+    missing_fields = [field for field in required_fields if not lead.get(field)]
+    if missing_fields:
+        logging.warning(f"Missing fields: {', '.join(missing_fields)}")
+        return False, f"Missing fields: {', '.join(missing_fields)}"
+    logging.info(f"Valid lead received: {lead['name']}")
+    return True, "Valid lead"
+
+# Convert time to UTC and handle time zones
+def normalize_time_zone(lead):
+    try:
+        local_tz = pytz.timezone(lead['time_zone'])
+        utc_time = pd.Timestamp.now(tz=local_tz).astimezone(pytz.UTC)
+        lead['timestamp_utc'] = utc_time.strftime('%Y-%m-%d %H:%M:%S')
+        lead['local_timestamp'] = pd.Timestamp.now(tz=local_tz).strftime('%Y-%m-%d %H:%M:%S')
+    except Exception:
+        lead['timestamp_utc'] = pd.Timestamp.now(tz=pytz.UTC).strftime('%Y-%m-%d %H:%M:%S')
+        lead['local_timestamp'] = 'Unknown'
+    return lead
+
+# Assign sales rep based on round-robin distribution
+def assign_sales_rep():
+    # List of sales reps (you can add more or retrieve from Google Sheets)
+    sales_reps = ["Rep1", "Rep2", "Rep3"]
+    leads = load_leads()
+    assigned_reps = leads['assigned_sales_rep'].tolist()
+    
+    # Round-robin assignment logic
+    available_reps = [rep for rep in sales_reps if rep not in assigned_reps]
+    if not available_reps:  # All sales reps have been assigned leads
+        return sales_reps[0]  # Reassign the first rep
+    return available_reps[0]
+
+# Notify high-value leads
+def notify_high_value_lead(lead):
+    if lead.get('budget', 0) >= 10000:  # Example high-value threshold
+        try:
+            email = EmailMessage()
+            email.set_content(f"High-value lead received:\n\n{json.dumps(lead, indent=2)}")
+            email['Subject'] = "High-Value Lead Notification"
+            email['From'] = os.getenv("EMAIL_FROM")
+            email['To'] = os.getenv("EMAIL_TO")
+
+            with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
+                smtp.starttls()
+                smtp.login(os.getenv("EMAIL_FROM"), os.getenv("EMAIL_PASSWORD"))
+                smtp.send_message(email)
+            logging.info(f"High-value lead notification sent to {os.getenv('EMAIL_TO')}")
+        except Exception as e:
+            logging.error(f"Error sending email notification: {e}")
+
+@app.route('/add-lead', methods=['POST'])
+def add_lead():
+    new_lead = request.json
+
+    # Validate lead data
+    is_valid, message = validate_lead(new_lead)
+    if not is_valid:
+        return jsonify({"status": "error", "message": message}), 400
+
+    # Handle time zones
+    new_lead = normalize_time_zone(new_lead)
+
+    # Assign sales rep
+    new_lead['assigned_sales_rep'] = assign_sales_rep()
+
+    # Load existing leads and append new one
+    leads = load_leads()
+    leads = pd.concat([leads, pd.DataFrame([new_lead])], ignore_index=True)
+    save_leads(leads)
+
+    # Notify for high-value lead
+    notify_high_value_lead(new_lead)
+
+    logging.info(f"Lead added: {new_lead['name']}")
+    return jsonify({"status": "success", "lead": new_lead})
+
+@app.route('/leads', methods=['GET'])
+def get_leads():
+    leads = load_leads()
+    logging.info(f"Fetched {len(leads)} leads.")
+    return jsonify(leads.to_dict(orient="records"))
+
+if _name_ == '_main_':
+    logging.info("Starting Flask application with Waitress server...")
+    serve(app, host='0.0.0.0', port=5000)from flask import Flask, request, jsonify
+import pandas as pd
+import pytz
+import smtplib
+from email.message import EmailMessage
+import json
+import os
+import logging
+from dotenv import load_dotenv
+from waitress import serve  # Import Waitress
+from logging.handlers import RotatingFileHandler
+
+# Load environment variables
+load_dotenv()
+
+app = Flask(_name_)
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(), RotatingFileHandler("app.log", maxBytes=1000000, backupCount=3)]
+)
+
+# Load leads from a file (in this case, a JSON file)
+leads_file = "leads.json"
+
+def load_leads():
+    try:
+        with open(leads_file, "r") as file:
+            return pd.DataFrame(json.load(file))
+    except FileNotFoundError:
+        return pd.DataFrame(columns=['name', 'email', 'budget', 'time_zone', 'timestamp_utc', 'local_timestamp', 'assigned_sales_rep', 'comments'])
+
+def save_leads(leads):
+    leads.to_json(leads_file, orient="records", indent=4)
+
+# Validate lead data
+def validate_lead(lead):
+    required_fields = ['name', 'email', 'budget', 'time_zone']
+    missing_fields = [field for field in required_fields if not lead.get(field)]
+    if missing_fields:
+        logging.warning(f"Missing fields: {', '.join(missing_fields)}")
+        return False, f"Missing fields: {', '.join(missing_fields)}"
+    logging.info(f"Valid lead received: {lead['name']}")
+    return True, "Valid lead"
+
+# Convert time to UTC and handle time zones
+def normalize_time_zone(lead):
+    try:
+        local_tz = pytz.timezone(lead['time_zone'])
+        utc_time = pd.Timestamp.now(tz=local_tz).astimezone(pytz.UTC)
+        lead['timestamp_utc'] = utc_time.strftime('%Y-%m-%d %H:%M:%S')
+        lead['local_timestamp'] = pd.Timestamp.now(tz=local_tz).strftime('%Y-%m-%d %H:%M:%S')
+    except Exception:
+        lead['timestamp_utc'] = pd.Timestamp.now(tz=pytz.UTC).strftime('%Y-%m-%d %H:%M:%S')
+        lead['local_timestamp'] = 'Unknown'
+    return lead
+
+# Assign sales rep based on round-robin distribution
+def assign_sales_rep():
+    # List of sales reps (you can add more or retrieve from Google Sheets)
+    sales_reps = ["Rep1", "Rep2", "Rep3"]
+    leads = load_leads()
+    assigned_reps = leads['assigned_sales_rep'].tolist()
+    
+    # Round-robin assignment logic
+    available_reps = [rep for rep in sales_reps if rep not in assigned_reps]
+    if not available_reps:  # All sales reps have been assigned leads
+        return sales_reps[0]  # Reassign the first rep
+    return available_reps[0]
+
+# Notify high-value leads
+def notify_high_value_lead(lead):
+    if lead.get('budget', 0) >= 10000:  # Example high-value threshold
+        try:
+            email = EmailMessage()
+            email.set_content(f"High-value lead received:\n\n{json.dumps(lead, indent=2)}")
+            email['Subject'] = "High-Value Lead Notification"
+            email['From'] = os.getenv("EMAIL_FROM")
+            email['To'] = os.getenv("EMAIL_TO")
+
+            with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
+                smtp.starttls()
+                smtp.login(os.getenv("EMAIL_FROM"), os.getenv("EMAIL_PASSWORD"))
+                smtp.send_message(email)
+            logging.info(f"High-value lead notification sent to {os.getenv('EMAIL_TO')}")
+        except Exception as e:
+            logging.error(f"Error sending email notification: {e}")
+
+@app.route('/add-lead', methods=['POST'])
+def add_lead():
+    new_lead = request.json
+
+    # Validate lead data
+    is_valid, message = validate_lead(new_lead)
+    if not is_valid:
+        return jsonify({"status": "error", "message": message}), 400
+
+    # Handle time zones
+    new_lead = normalize_time_zone(new_lead)
+
+    # Assign sales rep
+    new_lead['assigned_sales_rep'] = assign_sales_rep()
+
+    # Load existing leads and append new one
+    leads = load_leads()
+    leads = pd.concat([leads, pd.DataFrame([new_lead])], ignore_index=True)
+    save_leads(leads)
+
+    # Notify for high-value lead
+    notify_high_value_lead(new_lead)
+
+    logging.info(f"Lead added: {new_lead['name']}")
+    return jsonify({"status": "success", "lead": new_lead})
+
+@app.route('/leads', methods=['GET'])
+def get_leads():
+    leads = load_leads()
+    logging.info(f"Fetched {len(leads)} leads.")
+    return jsonify(leads.to_dict(orient="records"))
+
+if _name_ == '_main_':
+    logging.info("Starting Flask application with Waitress server...")
+    serve(app, host='0.0.0.0', port=5000)

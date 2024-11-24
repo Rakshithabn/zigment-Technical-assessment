@@ -1,0 +1,21 @@
+Environment Setup:
+
+Loads environment variables from a .env file using load_dotenv().
+Sets up the logging configuration to capture both console and file-based logs with a rotating file handler (RotatingFileHandler).
+Application Initialization:
+
+A Flask application is created and configured with logging.
+Uses the Waitress server to handle production-level requests instead of Flask's built-in server.
+Lead Management:
+
+A JSON file (leads.json) is used to persist the leads. This acts as the application's database.
+Functions load_leads() and save_leads() handle reading and writing leads to this JSON file using Pandas for data manipulation.
+Lead Validation:
+
+The validate_lead() function checks if the incoming lead data contains all the necessary fields (name, email, budget, time_zone).
+If required fields are missing, it logs a warning and returns an error response.
+Time Zone Handling:
+
+The normalize_time_zone() function handles the lead's time zone.
+It converts the lead's local time to UTC using pytz and saves both the UTC and local timestamps to the lead's data.
+In case of an error, it defaults to UTC and marks the local timestamp as "Unknown."
